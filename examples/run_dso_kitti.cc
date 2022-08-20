@@ -311,12 +311,13 @@ int main(int argc, char **argv) {
 
 	// to make MacOS happy: run this in dedicated thread -- and use this one to run the GUI.
 	std::thread runthread([&]() {
+		// Part 1. Initialize image
 		std::vector<int> idsToPlay;
 		std::vector<double> timesToPlayAt;
 		for (int i = lstart; i >= 0 && i < reader->getNumImages() && linc * i < linc * lend; i += linc) {
 			idsToPlay.push_back(i);
 			if (timesToPlayAt.size() == 0) {
-				timesToPlayAt.push_back((double) 0);
+				timesToPlayAt.push_back((double)0);
 			} else {
 				double tsThis = reader->getTimestamp(idsToPlay[idsToPlay.size() - 1]);
 				double tsPrev = reader->getTimestamp(idsToPlay[idsToPlay.size() - 2]);
@@ -324,13 +325,11 @@ int main(int argc, char **argv) {
 			}
 		}
 
-
 		std::vector<ImageAndExposure *> preloadedImages;
 		if (preload) {
 			printf("LOADING ALL IMAGES!\n");
-			for (int ii = 0; ii < (int) idsToPlay.size(); ii++) {
-				int i = idsToPlay[ii];
-				preloadedImages.push_back(reader->getImage(i));
+			for (int image_id : idsToPlay) {
+				preloadedImages.push_back(reader->getImage(image_id));
 			}
 		}
 
@@ -339,12 +338,12 @@ int main(int argc, char **argv) {
 		clock_t started = clock();
 		double sInitializerOffset = 0;
 
-
+		// Part 2. Map image
 		for (int ii = 0; ii < (int) idsToPlay.size(); ii++) {
-
-			while (setting_pause == true) {
+			while (setting_pause) {
 				usleep(5000);
 			}
+
 			if (!fullSystem->initialized)    // if not initialized: reset start time.
 			{
 				gettimeofday(&tv_start, NULL);
@@ -355,18 +354,17 @@ int main(int argc, char **argv) {
 			int i = idsToPlay[ii];
 
 			ImageAndExposure *img;
-			if (preload)
+			if (preload) {
 				img = preloadedImages[ii];
-			else
+			} else {
 				img = reader->getImage(i);
-
+			}
 
 			bool skipFrame = false;
 			if (playbackSpeed != 0) {
 				struct timeval tv_now;
 				gettimeofday(&tv_now, NULL);
-				double sSinceStart = sInitializerOffset + ((tv_now.tv_sec - tv_start.tv_sec) +
-														   (tv_now.tv_usec - tv_start.tv_usec) / (1000.0f * 1000.0f));
+				double sSinceStart = sInitializerOffset + ((tv_now.tv_sec - tv_start.tv_sec) + (tv_now.tv_usec - tv_start.tv_usec) / (1000.0f * 1000.0f));
 
 				if (sSinceStart < timesToPlayAt[ii]) {
 					// usleep((int) ((timesToPlayAt[ii] - sSinceStart) * 1000 * 1000));
@@ -375,7 +373,11 @@ int main(int argc, char **argv) {
 					skipFrame = true;
 				}
 			}
-			if (!skipFrame) fullSystem->addActiveFrame(img, i);
+
+			if (!skipFrame) {
+				fullSystem->addActiveFrame(img, i);
+			}
+
 			delete img;
 
 			if (fullSystem->initFailed || setting_fullResetRequested) {
@@ -397,7 +399,6 @@ int main(int argc, char **argv) {
 				LOG(INFO) << "Lost!";
 				break;
 			}
-
 		}
 
 		fullSystem->blockUntilMappingIsFinished();
@@ -406,6 +407,7 @@ int main(int argc, char **argv) {
 		struct timeval tv_end;
 		gettimeofday(&tv_end, NULL);
 
+		// Part 3. Log results
 		// in Kitti, the scale drift is obvious, so we only save the trajectory after loop closing.
 		fullSystem->printResultKitti(output_file, true);
 		fullSystem->printResultKitti(output_file + ".noloop", false);
@@ -413,8 +415,7 @@ int main(int argc, char **argv) {
 		int numFramesProcessed = abs(idsToPlay[0] - idsToPlay.back());
 		double numSecondsProcessed = fabs(reader->getTimestamp(idsToPlay[0]) - reader->getTimestamp(idsToPlay.back()));
 		double MilliSecondsTakenSingle = 1000.0f * (ended - started) / (float) (CLOCKS_PER_SEC);
-		double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec - tv_start.tv_sec) * 1000.0f +
-														   (tv_end.tv_usec - tv_start.tv_usec) / 1000.0f);
+		double MilliSecondsTakenMT = sInitializerOffset + ((tv_end.tv_sec - tv_start.tv_sec) * 1000.0f + (tv_end.tv_usec - tv_start.tv_usec) / 1000.0f);
 		printf("\n======================"
 			   "\n%d Frames (%.1f fps)"
 			   "\n%.2fms per frame (single core); "
@@ -427,6 +428,7 @@ int main(int argc, char **argv) {
 			   MilliSecondsTakenMT / (float) numFramesProcessed,
 			   1000 / (MilliSecondsTakenSingle / numSecondsProcessed),
 			   1000 / (MilliSecondsTakenMT / numSecondsProcessed));
+
 		if (setting_logStuff) {
 			std::ofstream tmlog;
 			tmlog.open("logs/time.txt", std::ios::trunc | std::ios::out);
@@ -438,12 +440,13 @@ int main(int argc, char **argv) {
 		}
 	});
 
-	if (viewer)
+	if (viewer) {
 		viewer->run();  // mac os should keep this in main thread.
+	}
 
 	runthread.join();
 
-
 	LOG(INFO) << "EXIT NOW!";
+
 	return 0;
 }

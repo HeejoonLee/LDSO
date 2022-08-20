@@ -33,9 +33,15 @@ The `main` function for *Kitti* dataset.
 7. Initialize a `FullSystem` with the vocabulary loaded in step 6
 8. Set fullsystem's gamma function and linearize operation.
 9. Initialize a `PangolinDSOViewer` and set it as the fullsystem's viewer
-10. Run the main thread(**TODO**)
-11. Run the viewer thread
-12. Wait for the main thread to finish
+10. Run the LDSO thread
+    1. For each image, add its ID and its timestamp to their respective vectors:
+        * The timestamp of the first image is always 0
+        * The timestamp of subsequent images are scaled by `playbackSpeed`
+    2. If `preload` is set, add an `ImageAndExposure *` to a vector for each image
+    3. (**TODO**)
+
+11. Run the viewer
+12. Wait for the LDSO thread to finish
 13. End
 
 
@@ -56,6 +62,13 @@ The `main` function for *Kitti* dataset.
     2. Read each line and add it to the vector `timestamps`
         * Each line should be a number of type double indicating a time value
     3. Get image file paths and add it to the vector `files`
+
+* getNumImages: Return the size of `files` vector
+
+* getTimestamp: Return the timestamp of the given index.
+
+* getImage: Return a pointer to an `ImageAndExposure` object created from undistorted image of the given ID(**TODO**)
+
 
 
 ## TODOs
