@@ -20,7 +20,7 @@ The `FullSystem` class is defined here.
 
 
 ### Examples
-### run_dso_kitti.cc
+### run_dso_kitti.cc 
 The `main` function for *Kitti* dataset.
 
 1. Check for any setting conflicts
