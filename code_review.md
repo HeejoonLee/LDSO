@@ -17,6 +17,48 @@ Variables used without declaration in other files are usually defined in `Settin
 
 The `FullSystem` class is defined here.
 
+* Constructor
+    1. Get a pointer to `ORBVocabulary` as an argument
+    2. Initialize some variables(**TODO**)
+    3. Start the mapping thread(`mappingThread`)
+        * Init function is `FullSystem::mappingLoop` method with the current class instance as the context
+    4. Initialize a `PixelSelector` object
+    5. Initialize a selection map
+    6. If loop closing is enabled, initialize a `LoopClosing` object
+
+* blockUntilMappingIsFinished
+    * Wait until the mapping thread(`mappingThread`) is finished. If loop closing in enabled, terminate loopClosing. Update globalMap.
+
+##### PixelSelector2.cc
+
+The `PixelSelector` class is defined here.
+
+* Constructor
+    1. Get width and height as arguments.
+    2. Create a random pattern of size (width * height). Each pattern is a random byte.
+    3. Set currentPotential to 3.
+    4. Create gradHist, ths, and thsSmoothed(size is proportional to width * height).
+
+##### LoopClosing.cc
+
+The `LoopClosing` class is defined here.
+Mutex `mutexKFQueue` is used to lock access to `KFqueue` which stores keyframes.
+
+
+* Constructor
+    1. Start a new thread called mainLoop with its `Run` method.
+    2. Create idepthMap of float[width * height]
+
+* Run
+    1. Get the oldest keyframe from `KFqueue`
+    2. Push the popped keyframe to `allKF`
+    3. Compute the bag-of-words of the keyframe.
+    4. If a loop has been detected, start the pose graph optimization thread.
+    5. Sleep for 5000us, then go back to 1. 
+
+* InsertKeyFrame
+    1. Push the given `Frame` object to `KFqueue`(TODO: What is a `Frame` object?)
+
 
 
 ### Examples
@@ -37,8 +79,17 @@ The `main` function for *Kitti* dataset.
     1. For each image, add its ID and its timestamp to their respective vectors:
         * The timestamp of the first image is always 0
         * The timestamp of subsequent images are scaled by `playbackSpeed`
-    2. If `preload` is set, add an `ImageAndExposure *` to a vector for each image
-    3. (**TODO**)
+    2. If `preload` is set, add an `ImageAndExposure *` of each image to the vector
+    3. Start timer
+    4. For each image in the ID vector:
+        1. If `FullSystem` is not initialized(**TODO**), restart the timer
+        2. If the image has been preloaded, get the image from `ImageAndExposure *` vector. Otherwise, load the image.
+        3. Skip frame settings(**TODO**)
+        4. Add frame to the full system
+        5. if full system's initalization failed or full reset is request, reset the full system
+        6. If the full system is lost, terminate the loop
+    5. Wait until the full system is finished
+
 
 11. Run the viewer
 12. Wait for the LDSO thread to finish
