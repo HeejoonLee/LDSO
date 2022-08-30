@@ -288,8 +288,9 @@ int main(int argc, char **argv) {
 	if (reversePlay) {
 		LOG(INFO) << "REVERSE!!!!";
 		lstart = endIdx - 1;
-		if (lstart >= reader->getNumImages())
+		if (lstart >= reader->getNumImages()) {
 			lstart = reader->getNumImages() - 1;
+		}
 		lend = startIdx;
 		linc = -1;
 	}

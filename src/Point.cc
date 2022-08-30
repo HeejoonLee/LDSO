@@ -8,6 +8,14 @@ using namespace ldso::internal;
 namespace ldso {
     unsigned long Point::mNextId = 0;
 
+    /**
+     * @brief Construct a new Point:: Point object from a Feature. 
+     * Set the Point's mHostFeature as the feature given in the constructor. 
+     * Create a PointHessian from the feature's immature point and set it to mpPH.
+     * Set mpPH's point to the feature's point(meaningless?) and set Point's id.
+     * 
+     * @param hostFeature 
+     */
     Point::Point(shared_ptr<Feature> hostFeature) {
         mHostFeature = hostFeature;
         if (hostFeature->ip)    // create from immature point
@@ -31,6 +39,11 @@ namespace ldso {
         }
     }
 
+    /**
+     * @brief Calculate mWorldPos using the Point's host feature and its frame.
+     * Refer to the original paper for an explanation of the algorithm.
+     * 
+     */
     void Point::ComputeWorldPos() {
         shared_ptr<Feature> feat = mHostFeature.lock();
         if (feat) {

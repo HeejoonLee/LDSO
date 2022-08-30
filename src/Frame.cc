@@ -34,10 +34,19 @@ namespace ldso {
         }
     }
 
+    /**
+     * @brief Create a FrameHessian object from frame and save it in frameHessian
+     * 
+     * @param frame 
+     */
     void Frame::CreateFH(shared_ptr<Frame> frame) {
         frameHessian = shared_ptr<internal::FrameHessian>(new internal::FrameHessian(frame));
     }
 
+    /**
+     * @brief For each feature in features, if the feature is a corner, save its index in the 2D grid, whose coordinates match the pixel coordinates of the feature.
+     * 
+     */
     void Frame::SetFeatureGrid() {
         int gw = wG[0] / gridSize, gh = hG[0] / gridSize;
         grid.resize(gw * gh);
@@ -51,6 +60,14 @@ namespace ldso {
         }
     }
 
+    /**
+     * @brief Get a list of feature indices whose distance from (x, y) is within radius. i.e. |(u,v) - (x,y)| <= radius
+     * 
+     * @param x 
+     * @param y 
+     * @param radius 
+     * @return vector<size_t> List of indices(index into features vector)
+     */
     vector<size_t> Frame::GetFeatureInGrid(const float &x, const float &y, const float &radius) {
         vector<size_t> indices;
         int gw = wG[0] / gridSize, gh = hG[0] / gridSize;
@@ -85,6 +102,11 @@ namespace ldso {
         return indices;
     }
 
+    /**
+     * @brief For each feature, if the feature is a corner, copy its descriptor and save it in allDesp(vector of descriptors). Save the feature index in bowIdx. Calculate bowVec and featVec using the ORBVocabulary and the descriptors.
+     * 
+     * @param voc Pointer to the ORB vocabulary
+     */
     void Frame::ComputeBoW(shared_ptr<ORBVocabulary> voc) {
         // convert corners into BoW
         vector<cv::Mat> allDesp;
@@ -101,6 +123,12 @@ namespace ldso {
         voc->transform(allDesp, bowVec, featVec, 4);
     }
 
+    /**
+     * @brief Extract keys from poseRel
+     * Note: poseRel is a map from a Frame pointer to a RELPOSE. Ranged for loop over a map iterates over the key, value pair and .first method is used to return the key.
+     * 
+     * @return set<shared_ptr<Frame>> A set of Frame pointers from poseRel map(All the keys are extracted from poseRel)
+     */
     set<shared_ptr<Frame>> Frame::GetConnectedKeyFrames() {
         set<shared_ptr<Frame>> connectedFrames;
         for (auto &rel: poseRel)
@@ -108,6 +136,11 @@ namespace ldso {
         return connectedFrames;
     }
 
+    /**
+     * @brief For each feature, if the feature is valid(meaning that a Point object has been created that corresponds to the feature), add its Point pointer to the pts vector
+     * 
+     * @return vector<shared_ptr<Point>> A vector of Point pointers from valid features
+     */
     vector<shared_ptr<Point>> Frame::GetPoints() {
         vector<shared_ptr<Point>> pts;
         for (auto &feat: features) {

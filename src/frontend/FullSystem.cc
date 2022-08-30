@@ -52,7 +52,6 @@ namespace ldso {
         } else {
             LOG(INFO) << "loop closing is disabled" << endl;
         }
-
     }
 
     FullSystem::~FullSystem() {
@@ -61,23 +60,35 @@ namespace ldso {
         this->unmappedTrackedFrames.clear();
         if (setting_enableLoopClosing == false) {
             delete[] selectionMap;
-        } else {
         }
     }
 
     void FullSystem::addActiveFrame(ImageAndExposure *image, int id) {
-        if (isLost)
+        if (isLost) {
             return;
+        }
+
         unique_lock<mutex> lock(trackMutex);
 
         LOG(INFO) << "*** taking frame " << id << " ***" << endl;
 
         // create frame and frame hessian
+        // Initialize the frame and frameHessian objects
+        // The two objects are created and set to point each other
+        // frame <---> frameHessian
+        // 1. Create a frame using timestamp
+        // 2. Create a frameHessian using the frame
+        // 3. Add the created frame to the allFrameHistory(vector of frames)
         shared_ptr<Frame> frame(new Frame(image->timestamp));
         frame->CreateFH(frame);
         allFrameHistory.push_back(frame);
 
         // ==== make images ==== //
+        // 1. Get the frameHessian of the frame
+        // 2. Set ab_exposure of the frameHessian to the exposure time of the image
+        // 3. Make images with the image(float array) and calibHessian
+        // Note: Hcalib is a Camera object initialized in the FullSystem constructor.
+        // Hcalib->mpCH is the calibHessian of the camera.
         shared_ptr<FrameHessian> fh = frame->frameHessian;
         fh->ab_exposure = image->exposure_time;
         fh->makeImages(image->image, Hcalib->mpCH);
@@ -87,7 +98,7 @@ namespace ldso {
             // use initializer
             if (coarseInitializer->frameID < 0) {   // first frame not set, set it
                 coarseInitializer->setFirst(Hcalib->mpCH, fh);
-            } else if (coarseInitializer->trackFrame(fh)) {
+            } else if (coarseInitializer->trackFrame(fh)) {  // trackFrame method is only called here
                 // init succeeded
                 initializeFromInitializer(fh);
                 lock.unlock();
@@ -407,6 +418,11 @@ namespace ldso {
         globalMap->UpdateAllWorldPoints();
     }
 
+    /**
+     * @brief TODO(heejoon.lee)
+     * 
+     * @param fh 
+     */
     void FullSystem::makeKeyFrame(shared_ptr<FrameHessian> fh) {
 
         shared_ptr<Frame> frame = fh->frame;
@@ -427,6 +443,7 @@ namespace ldso {
         unique_lock<mutex> lock(mapMutex);
 
         // == flag frames to be marginalized  == //
+        // TODO(heejoon.lee): Passed argument fh not used
         flagFramesForMarginalization(fh);
 
         // add new frame to hessian struct
@@ -659,9 +676,9 @@ namespace ldso {
 
         // marginalize all frames that have not enough points.
         for (int i = 0; i < (int) frames.size(); i++) {
-
             shared_ptr<FrameHessian> &fh = frames[i]->frameHessian;
             int in = 0, out = 0;
+
             for (auto &feat: frames[i]->features) {
                 if (feat->status == Feature::FeatureStatus::IMMATURE) {
                     in++;
@@ -669,14 +686,14 @@ namespace ldso {
                 }
 
                 shared_ptr<Point> p = feat->point;
-                if (p && p->status == Point::PointStatus::ACTIVE)
+                if (p && p->status == Point::PointStatus::ACTIVE) {
                     in++;
-                else
+                } else {
                     out++;
+                }
             }
 
-            Vec2 refToFh = AffLight::fromToVecExposure(frames.back()->frameHessian->ab_exposure, fh->ab_exposure,
-                                                       frames.back()->frameHessian->aff_g2l(), fh->aff_g2l());
+            Vec2 refToFh = AffLight::fromToVecExposure(frames.back()->frameHessian->ab_exposure, fh->ab_exposure, frames.back()->frameHessian->aff_g2l(), fh->aff_g2l());
 
             // some kind of marginlization conditions
             if ((in < setting_minPointsRemaining * (in + out) ||
@@ -1015,12 +1032,14 @@ namespace ldso {
 
         int trace_total = 0, trace_good = 0, trace_oob = 0, trace_out = 0, trace_skip = 0, trace_badcondition = 0, trace_uninitialized = 0;
 
+        // Mat33f: 3x3 matrix of floats(?)
         Mat33f K = Mat33f::Identity();
         K(0, 0) = Hcalib->mpCH->fxl();
         K(1, 1) = Hcalib->mpCH->fyl();
         K(0, 2) = Hcalib->mpCH->cxl();
         K(1, 2) = Hcalib->mpCH->cyl();
 
+        // FullSystem::frames: A vector of active frames
         for (shared_ptr<Frame> fr: frames) {
             shared_ptr<FrameHessian> host = fr->frameHessian;
 
@@ -1028,8 +1047,7 @@ namespace ldso {
             Mat33f KRKi = K * hostToNew.rotationMatrix().cast<float>() * K.inverse();
             Vec3f Kt = K * hostToNew.translation().cast<float>();
 
-            Vec2f aff = AffLight::fromToVecExposure(host->ab_exposure, fh->ab_exposure, host->aff_g2l(),
-                                                    fh->aff_g2l()).cast<float>();
+            Vec2f aff = AffLight::fromToVecExposure(host->ab_exposure, fh->ab_exposure, host->aff_g2l(), fh->aff_g2l()).cast<float>();
 
             for (auto feat: fr->features) {
                 if (feat->status == Feature::FeatureStatus::IMMATURE && feat->ip) {
@@ -1323,6 +1341,20 @@ namespace ldso {
         }
     }
 
+    /**
+     * @brief Add the first frame to the globalMap. Set the newFrame's pose using the first frame
+     * 
+     * 1. Get the first frame(Frame added in coarseInitializer->setFirst) => fr
+     * 2. For each Pnt in the frame:
+     *     a. Create a Feature(2D Point)
+     *     b. Create an ImmaturePoint
+     *     c. Create a Point(3D Point) => ph
+     * 3. Set the newFrame's pose
+     * 4. Set initialized = true
+     * 5. Add fr(first frame) to the globalMap frames set.
+     * 
+     * @param newFrame 
+     */
     void FullSystem::initializeFromInitializer(shared_ptr<FrameHessian> newFrame) {
         unique_lock<mutex> lock(mapMutex);
 
@@ -1352,14 +1384,13 @@ namespace ldso {
 
         // Create features in the first frame.
         for (size_t i = 0; i < size_t(coarseInitializer->numPoints[0]); i++) {
-
-            if (rand() / (float) RAND_MAX > keepPercentage)
+            if (rand() / (float) RAND_MAX > keepPercentage) {
                 continue;
+            }
             Pnt *point = coarseInitializer->points[0] + i;
 
             shared_ptr<Feature> feat(new Feature(point->u + 0.5f, point->v + 0.5f, firstFrame->frame));
-            feat->ip = shared_ptr<ImmaturePoint>(
-                new ImmaturePoint(firstFrame->frame, feat, point->my_type, Hcalib->mpCH));
+            feat->ip = shared_ptr<ImmaturePoint>(new ImmaturePoint(firstFrame->frame, feat, point->my_type, Hcalib->mpCH));
 
             if (!std::isfinite(feat->ip->energyTH)) {
                 feat->ReleaseImmature();
@@ -1372,6 +1403,7 @@ namespace ldso {
                 feat->ReleaseMapPoint();
                 continue;
             }
+
             feat->ReleaseImmature();    // no longer needs the immature part
             fr->features.push_back(feat);
 
@@ -1380,7 +1412,6 @@ namespace ldso {
             ph->hasDepthPrior = true;
             ph->point->status = Point::PointStatus::ACTIVE;
             ph->takeData(); // set the idepth into optimization
-
         }
 
         SE3 firstToNew = coarseInitializer->thisToNext;

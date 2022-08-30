@@ -37,8 +37,27 @@ namespace ldso {
         delete[] JbBuffer_new;
     }
 
+    /**
+     * @brief Change the old params by lambda and try to reduce the error. If the error has been reduced and a certain condition has been met, set the frame as snapped. Return true only when 7 consecutive frames have been snapped.
+     * 
+     * 1. If snapped == false, initialize Pnt array for each pyramid level
+     * 2. For each pyramid level(starting with the highest level):
+     *     a. Get resOld using the current SE3 and AffLight objects
+     *     b. while loop:
+     *         i. Change the current parameters by lambda
+     *         ii. Get resNew from the new SE3 and AffLight objects calculated from the new parameters
+     *         iii. Compare total error(If the error has decreased, set accept = true)
+     *         iv. If accept == true, set snapped = true(based on a criterion), update old params and halve lambda
+     *         v. Otherwise, quadruple lambda
+     * 3. Update params
+     * 4. If snapped == false, reset the first snapped frame ID(snappedAt)
+     * 
+     * 
+     * @param newFrameHessian 
+     * @return true 7 consecutive frames are snapped
+     * @return false 
+     */
     bool CoarseInitializer::trackFrame(shared_ptr<FrameHessian> newFrameHessian) {
-
         newFrame = newFrameHessian;
         int maxIterations[] = {5, 5, 10, 30, 50};
 
@@ -63,17 +82,15 @@ namespace ldso {
         SE3 refToNew_current = thisToNext;
         AffLight refToNew_aff_current = thisToNext_aff;
 
-        if (firstFrame->ab_exposure > 0 && newFrame->ab_exposure > 0)
-            refToNew_aff_current = AffLight(logf(newFrame->ab_exposure / firstFrame->ab_exposure),
-                                            0); // coarse approximation.
-
-
+        if (firstFrame->ab_exposure > 0 && newFrame->ab_exposure > 0) {
+            refToNew_aff_current = AffLight(logf(newFrame->ab_exposure / firstFrame->ab_exposure), 0); // coarse approximation.
+        }
+            
         Vec3f latestRes = Vec3f::Zero();
         for (int lvl = pyrLevelsUsed - 1; lvl >= 0; lvl--) {
-
-
-            if (lvl < pyrLevelsUsed - 1)
+            if (lvl < pyrLevelsUsed - 1) {
                 propagateDown(lvl + 1);
+            }
 
             Mat88f H, Hsc;
             Vec8f b, bsc;
@@ -95,22 +112,20 @@ namespace ldso {
                 Hl = wM * Hl * wM * (0.01f / (w[lvl] * h[lvl]));
                 bl = wM * bl * (0.01f / (w[lvl] * h[lvl]));
 
-
                 Vec8f inc;
                 if (fixAffine) {
                     inc.head<6>() = -(wM.toDenseMatrix().topLeftCorner<6, 6>() *
                                       (Hl.topLeftCorner<6, 6>().ldlt().solve(bl.head<6>())));
                     inc.tail<2>().setZero();
-                } else
+                } else {
                     inc = -(wM * (Hl.ldlt().solve(bl)));    //=-H^-1 * b.
-
+                }
 
                 SE3 refToNew_new = SE3::exp(inc.head<6>().cast<double>()) * refToNew_current;
                 AffLight refToNew_aff_new = refToNew_aff_current;
                 refToNew_aff_new.a += inc[6];
                 refToNew_aff_new.b += inc[7];
                 doStep(lvl, lambda, inc);
-
 
                 Mat88f H_new, Hsc_new;
                 Vec8f b_new, bsc_new;
@@ -120,13 +135,12 @@ namespace ldso {
                 float eTotalNew = (resNew[0] + resNew[1] + regEnergy[1]);
                 float eTotalOld = (resOld[0] + resOld[1] + regEnergy[0]);
 
-
                 bool accept = eTotalOld > eTotalNew;
 
                 if (accept) {
-
-                    if (resNew[1] == alphaK * numPoints[lvl])
+                    if (resNew[1] == alphaK * numPoints[lvl]) {
                         snapped = true;
+                    }
                     H = H_new;
                     b = b_new;
                     Hsc = Hsc_new;
@@ -154,25 +168,30 @@ namespace ldso {
                     quitOpt = true;
                 }
 
+                if (quitOpt) {
+                    break;
+                }
 
-                if (quitOpt) break;
                 iteration++;
             }
             latestRes = resOld;
-
         }
 
         thisToNext = refToNew_current;
         thisToNext_aff = refToNew_aff_current;
 
-        for (int i = 0; i < pyrLevelsUsed - 1; i++)
+        for (int i = 0; i < pyrLevelsUsed - 1; i++) {
             propagateUp(i);
+        }
 
         frameID++;
-        if (!snapped) snappedAt = 0;
+        if (!snapped) {
+            snappedAt = 0;
+        }
 
-        if (snapped && snappedAt == 0)
+        if (snapped && snappedAt == 0) {
             snappedAt = frameID;
+        }
 
         return snapped && frameID > snappedAt + 5;
     }
@@ -544,8 +563,20 @@ namespace ldso {
         }
     }
 
+    /**
+     * @brief The first method called in the initialization step. Initializes firstFrame. Sets frameID to 0.
+     * 1. makeK(HCalib)
+     * 2. For each pyramid level:
+     *     a. Populate statusMap(PixelSelector::makeMaps, makePixelStatus)
+     *     b. For each pixel:
+     *         i. Initialize a Pnt object depending on the status of the pixel
+     * 3. makeNN()
+     * 4. frameID = 0
+     * 
+     * @param HCalib 
+     * @param newFrameHessian 
+     */
     void CoarseInitializer::setFirst(shared_ptr<CalibHessian> HCalib, shared_ptr<FrameHessian> newFrameHessian) {
-
         makeK(HCalib);
         firstFrame = newFrameHessian;
 
@@ -564,14 +595,17 @@ namespace ldso {
                 npts = makePixelStatus(firstFrame->dIp[lvl], statusMapB, w[lvl], h[lvl], densities[lvl] * w[0] * h[0]);
             }
 
-            if (points[lvl] != 0) delete[] points[lvl];
+            if (points[lvl] != 0) {
+                delete[] points[lvl];
+            }
+
             points[lvl] = new Pnt[npts];
 
             // set idepth map to initially 1 everywhere.
             int wl = w[lvl], hl = h[lvl];
             Pnt *pl = points[lvl];
             int nl = 0;
-            for (int y = patternPadding + 1; y < hl - patternPadding - 2; y++)
+            for (int y = patternPadding + 1; y < hl - patternPadding - 2; y++) {
                 for (int x = patternPadding + 1; x < wl - patternPadding - 2; x++) {
                     if ((lvl != 0 && statusMapB[x + y * wl]) || (lvl == 0 && statusMap[x + y * wl] != 0)) {
                         //assert(patternNum==9);
@@ -600,10 +634,10 @@ namespace ldso {
                         assert(nl <= npts);
                     }
                 }
-
-
+            }
             numPoints[lvl] = nl;
         }
+
         delete[] statusMap;
         delete[] statusMapB;
 
@@ -613,9 +647,9 @@ namespace ldso {
         snapped = false;
         frameID = snappedAt = 0;
 
-        for (int i = 0; i < pyrLevelsUsed; i++)
+        for (int i = 0; i < pyrLevelsUsed; i++) {
             dGrads[i].setZero();
-
+        }
     }
 
     void CoarseInitializer::resetPoints(int lvl) {

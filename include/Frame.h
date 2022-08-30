@@ -155,6 +155,8 @@ namespace ldso {
         };
 
         // relative poses within the active window
+        // A map from [Frame] pointer to RELPOSE
+        // Note: map<key, value, comparer, allocator> 
         map<shared_ptr<Frame>, RELPOSE, std::less<shared_ptr<Frame>>, Eigen::aligned_allocator<std::pair<const shared_ptr<Frame>, RELPOSE>>> poseRel;
 
         // Bag of Words Vector structures.

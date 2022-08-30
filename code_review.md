@@ -90,7 +90,6 @@ The `main` function for *Kitti* dataset.
         6. If the full system is lost, terminate the loop
     5. Wait until the full system is finished
 
-
 11. Run the viewer
 12. Wait for the LDSO thread to finish
 13. End

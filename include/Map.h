@@ -72,6 +72,8 @@ namespace ldso {
         void runPoseGraphOptimization();
 
         mutex mapMutex; // map mutex to protect its data
+
+        // Set of Frames ordered by its ID
         set<shared_ptr<Frame>, CmpFrameID> frames;      // all KFs by ID
         set<shared_ptr<Frame>, CmpFrameID> framesOpti;  // KFs to be optimized
         shared_ptr<Frame> currentKF = nullptr;

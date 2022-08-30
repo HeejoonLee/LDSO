@@ -18,7 +18,11 @@ using namespace std;
 using namespace ldso::internal;
 
 namespace ldso {
-
+    /**
+     * @brief Add the given Frame kf to frames(set of Frames) if it is not already there
+     * 
+     * @param kf 
+     */
     void Map::AddKeyFrame(shared_ptr<Frame> kf) {
         unique_lock<mutex> mapLock(mapMutex);
         if (frames.find(kf) == frames.end()) {
@@ -26,6 +30,11 @@ namespace ldso {
         }
     }
 
+    /**
+     * @brief Last optimization of keyframes.
+     * Set keyframes to be optimized to all the frames in the frames set and run pose graph optimization starting with the last frame(frame with the highest ID)
+     * 
+     */
     void Map::lastOptimizeAllKFs() {
         LOG(INFO) << "Final pose graph optimization after odometry is finished.";
 
@@ -42,12 +51,22 @@ namespace ldso {
         runPoseGraphOptimization();
     }
 
+    /**
+     * @brief Optimize the keyframes in the frames set.
+     * There should only be one pose graph optimization thread running at any moment.
+     * Set framesOpti to the current frames set and start with the last frame(frame with the highest ID).
+     * Note: thread::detach lets the thread run independently from the thread that created it.
+     * 
+     * @return true PoseGraphOptimization thread is successfully created.
+     * @return false PoseGraphOptimization is already running.
+     */
     bool Map::OptimizeALLKFs() {
         {
             unique_lock<mutex> lock(mutexPoseGraph);
-            if (poseGraphRunning)
-                return false; // is already running ...
-            // if not, starts it
+            if (poseGraphRunning) {
+                return false; // Pose graph is already running
+            }
+            // If not, start the pose graph
             poseGraphRunning = true;
             // lock frames to prevent adding new kfs
             unique_lock<mutex> mapLock(mapMutex);
@@ -61,6 +80,10 @@ namespace ldso {
         return true;
     }
 
+    /**
+     * @brief For each frame in the frames set, for each feature in its features, if the feature has an associated point, calculate its world position(mWolrdPos)
+     * 
+     */
     void Map::UpdateAllWorldPoints() {
         unique_lock<mutex> lock(mutexPoseGraph);
         for (shared_ptr<Frame> frame: frames) {
@@ -72,9 +95,19 @@ namespace ldso {
         }
     }
 
+    /**
+     * @brief Run pose graph optimization
+     * 1. Set up optimizer
+     * 2. Add vertices to the optimizer
+     * 3. Add edges to the optimizer
+     * 4. Reset points
+     * 5. Refresh GUI(fullsystem)
+     * TODO(heejoon.lee): Read the original paper
+     * 
+     */
     void Map::runPoseGraphOptimization() {
-
         LOG(INFO) << "start pose graph thread!" << endl;
+
         // Setup optimizer
         g2o::SparseOptimizer optimizer;
         typedef BlockSolver<BlockSolverTraits<7, 3> > BlockSolverType;
@@ -92,7 +125,6 @@ namespace ldso {
         int cntEdgePR = 0;
 
         for (const shared_ptr<Frame> &fr: framesOpti) {
-
             // each kf has Sim3 pose
             int idKF = fr->kfId;
             if (idKF > maxKFid) {
@@ -111,26 +143,28 @@ namespace ldso {
             if (fr == currentKF) {
                 vSim3->setFixed(true);
             }
-
         }
 
         // edges
         for (const shared_ptr<Frame> &fr: framesOpti) {
             unique_lock<mutex> lock(fr->mutexPoseRel);
             for (auto &rel: fr->poseRel) {
-                VertexSim3 *vPR1 = (VertexSim3 *) optimizer.vertex(fr->kfId);
-                VertexSim3 *vPR2 = (VertexSim3 *) optimizer.vertex(rel.first->kfId);
+                VertexSim3 *vPR1 = (VertexSim3 *)optimizer.vertex(fr->kfId);
+                VertexSim3 *vPR2 = (VertexSim3 *)optimizer.vertex(rel.first->kfId);
                 EdgeSim3 *edgePR = new EdgeSim3();
-                if (vPR1 == nullptr || vPR2 == nullptr)
+                if (vPR1 == nullptr || vPR2 == nullptr) {
                     continue;
+                }
+
                 edgePR->setVertex(0, vPR1);
                 edgePR->setVertex(1, vPR2);
                 edgePR->setMeasurement(rel.second.Tcr);
 
-                if (rel.second.isLoop)
+                if (rel.second.isLoop) {
                     edgePR->setInformation(rel.second.info /* *10 */);
-                else
+                } else {
                     edgePR->setInformation(rel.second.info);
+                }
 
                 optimizer.addEdge(edgePR);
                 cntEdgePR++;
@@ -142,7 +176,7 @@ namespace ldso {
 
         // recover the pose and points estimation
         for (shared_ptr<Frame> frame: framesOpti) {
-            VertexSim3 *vSim3 = (VertexSim3 *) optimizer.vertex(frame->kfId);
+            VertexSim3 *vSim3 = (VertexSim3 *)optimizer.vertex(frame->kfId);
             Sim3 Scw = vSim3->estimate();
             CHECK(Scw.scale() > 0);
 
@@ -161,7 +195,8 @@ namespace ldso {
             latestOptimizedKfId = currentKF->kfId;
         }
 
-        if (fullsystem) fullsystem->RefreshGUI();
+        if (fullsystem) {
+            fullsystem->RefreshGUI();
+        }
     }
-
 }
