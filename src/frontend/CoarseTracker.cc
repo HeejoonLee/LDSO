@@ -27,8 +27,16 @@ namespace ldso {
         return alignedPtr;
     }
 
+    /**
+     * @brief CoarseTracker constructor
+     * Initialize each structure
+     * Per-level structure: idepth, weightSums, weightSums_back, pc_u, pc_v, pc_idepth, pc_color
+     * Per-frame structure: buf_*
+     * 
+     * @param ww Width of the frame(level 0 width)
+     * @param hh Height of the frame(level 0 height)
+     */
     CoarseTracker::CoarseTracker(int ww, int hh) {
-
         // make coarse tracking templates.
         for (int lvl = 0; lvl < pyrLevelsUsed; lvl++) {
             int wl = ww >> lvl;
@@ -42,7 +50,6 @@ namespace ldso {
             pc_v[lvl] = allocAligned<4, float>(wl * hl, ptrToDelete);
             pc_idepth[lvl] = allocAligned<4, float>(wl * hl, ptrToDelete);
             pc_color[lvl] = allocAligned<4, float>(wl * hl, ptrToDelete);
-
         }
 
         // warped buffers
@@ -246,7 +253,6 @@ namespace ldso {
     }
 
     void CoarseTracker::setCoarseTrackingRef(std::vector<shared_ptr<FrameHessian>> &frameHessians) {
-
         assert(frameHessians.size() > 0);
         lastRef = frameHessians.back();
         makeCoarseDepthL0(frameHessians);
@@ -256,16 +262,13 @@ namespace ldso {
     }
 
     void CoarseTracker::makeCoarseDepthL0(std::vector<shared_ptr<FrameHessian>> frameHessians) {
-
         // make coarse tracking templates for latstRef.
         memset(idepth[0], 0, sizeof(float) * w[0] * h[0]);
         memset(weightSums[0], 0, sizeof(float) * w[0] * h[0]);
 
         for (shared_ptr<FrameHessian> fh: frameHessians) {
             for (shared_ptr<Feature> feat: fh->frame->features) {
-                if (feat->status == Feature::FeatureStatus::VALID &&
-                    feat->point->status == Point::PointStatus::ACTIVE) {
-
+                if (feat->status == Feature::FeatureStatus::VALID && feat->point->status == Point::PointStatus::ACTIVE) {
                     shared_ptr<PointHessian> ph = feat->point->mpPH;
                     if (ph->lastResiduals[0].first != 0 && ph->lastResiduals[0].second == ResState::IN) {
                         shared_ptr<PointFrameResidual> r = ph->lastResiduals[0].first;
@@ -292,7 +295,11 @@ namespace ldso {
             float *idepth_lm = idepth[lvlm1];
             float *weightSums_lm = weightSums[lvlm1];
 
-            for (int y = 0; y < hl; y++)
+            /**
+            * idepth value at level l = sum of all idepth values of the previous level
+            * weightSums value at level l = sum of all weightSums values of level (l - 1)
+            */
+            for (int y = 0; y < hl; y++) {
                 for (int x = 0; x < wl; x++) {
                     int bidx = 2 * x + 2 * y * wlm1;
                     idepth_l[x + y * wl] =
@@ -307,12 +314,12 @@ namespace ldso {
                             weightSums_lm[bidx + wlm1] +
                             weightSums_lm[bidx + wlm1 + 1];
                 }
+            }
         }
 
         // dilate idepth by 1.
         for (int lvl = 0; lvl < 2; lvl++) {
             int numIts = 1;
-
 
             for (int it = 0; it < numIts; it++) {
                 int wh = w[lvl] * h[lvl] - w[lvl];
@@ -410,7 +417,7 @@ namespace ldso {
             float *lpc_color = pc_color[lvl];
 
 
-            for (int y = 2; y < hl - 2; y++)
+            for (int y = 2; y < hl - 2; y++) {
                 for (int x = 2; x < wl - 2; x++) {
                     int i = x + y * wl;
 
@@ -421,17 +428,19 @@ namespace ldso {
                         lpc_idepth[lpc_n] = idepthl[i];
                         lpc_color[lpc_n] = dIRefl[i][0];
 
-
                         if (!std::isfinite(lpc_color[lpc_n]) || !(idepthl[i] > 0)) {
                             idepthl[i] = -1;
                             continue;    // just skip if something is wrong.
                         }
+                        
                         lpc_n++;
-                    } else
+                    } else {
                         idepthl[i] = -1;
+                    }
 
                     weightSumsl[i] = 1;
                 }
+            }
 
             pc_n[lvl] = lpc_n;
         }
@@ -635,7 +644,6 @@ namespace ldso {
     // Coarse distance map
 
     CoarseDistanceMap::CoarseDistanceMap(int ww, int hh) {
-
         fwdWarpedIDDistFinal = new float[ww * hh / 4];
         bfsList1 = new Eigen::Vector2i[ww * hh / 4];
         bfsList2 = new Eigen::Vector2i[ww * hh / 4];
@@ -643,7 +651,6 @@ namespace ldso {
         coarseProjectionGrid = new PointFrameResidual *[2048 * (ww * hh / (fac * fac))];
         coarseProjectionGridNum = new int[ww * hh / (fac * fac)];
         w[0] = h[0] = 0;
-
     }
 
     CoarseDistanceMap::~CoarseDistanceMap() {
@@ -655,7 +662,6 @@ namespace ldso {
     }
 
     void CoarseDistanceMap::makeK(shared_ptr<CalibHessian> HCalib) {
-
         w[0] = wG[0];
         h[0] = hG[0];
 
@@ -683,15 +689,13 @@ namespace ldso {
         }
     }
 
-    void CoarseDistanceMap::makeDistanceMap(std::vector<shared_ptr<FrameHessian>> &frameHessians,
-                                            shared_ptr<FrameHessian> frame) {
-
+    void CoarseDistanceMap::makeDistanceMap(std::vector<shared_ptr<FrameHessian>> &frameHessians, shared_ptr<FrameHessian> frame) {
         int w1 = w[1];
         int h1 = h[1];
         int wh1 = w1 * h1;
-        for (int i = 0; i < wh1; i++)
+        for (int i = 0; i < wh1; i++) {
             fwdWarpedIDDistFinal[i] = 1000;
-
+        }
 
         // make coarse tracking templates for latstRef.
         int numItems = 0;
