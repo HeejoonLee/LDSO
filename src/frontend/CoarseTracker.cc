@@ -65,10 +65,7 @@ namespace ldso {
         w[0] = h[0] = 0;
     }
 
-    bool CoarseTracker::trackNewestCoarse(
-            shared_ptr<FrameHessian> newFrameHessian, SE3 &lastToNew_out,
-            AffLight &aff_g2l_out, int coarsestLvl, Vec5 minResForAbort) {
-
+    bool CoarseTracker::trackNewestCoarse(shared_ptr<FrameHessian> newFrameHessian, SE3 &lastToNew_out, AffLight &aff_g2l_out, int coarsestLvl, Vec5 minResForAbort) {
         assert(coarsestLvl < 5 && coarsestLvl < pyrLevelsUsed);
 
         lastResiduals.setConstant(NAN);
@@ -93,6 +90,10 @@ namespace ldso {
             float levelCutoffRepeat = 1;
 
             // compute the residual and adjust the huber threshold
+            // residual vector:
+            // res[0] = Total energy
+            // res[1] = Number of terms in energy
+            // res[5] = Proportion of saturated terms(energy term exceeding the threshold)
             Vec6 resOld = calcRes(lvl, refToNew_current, aff_g2l_current, setting_coarseCutoffTH * levelCutoffRepeat);
             while (resOld[5] > 0.6 && levelCutoffRepeat < 50) {
                 // more than 60% is over than threshold, then increate the cut off threshold
@@ -101,6 +102,23 @@ namespace ldso {
             }
 
             // Compute H and b
+            // Let y be the true value, f(x, B) the estimated value(B: params to optimize)
+            // S = sum(y - f(x, B))
+            // We need to find B that minimizes S
+
+            // Let the initial value of B be B0. Then,
+            // S(B0) = sum(y - f(x, B0))
+            // Let d indicate the step to take to minimize S. Then,
+            // S(B0 + d) should be minimized. 
+            // Let J = df/dB. Then, setting dS(B0 + d)/dd to zero yields,
+            // J.trans() * J * d = J.trans() * (y - f(x, B))
+
+            // Apply LM algorithm:
+            // (J.trans() * J + lambda * I) * d = J.trans() * (y - f(x, B))
+            // Solve for d to get the next step direction
+
+            // H should correnspond to J.trans() * J
+            // b should correspond to J.trans() * (y - f(x, B))
             calcGSSSE(lvl, H, b, refToNew_current, aff_g2l_current);
 
             float lambda = 0.01;
@@ -110,9 +128,20 @@ namespace ldso {
             //                                           aff_g2l_current).cast<float>();
 
             // L-M iteration
+            // Parameters to optimize: rotation(3), translation(3), affLight(2)
             for (int iteration = 0; iteration < maxIterations[lvl]; iteration++) {
                 Mat88 Hl = H;
-                for (int i = 0; i < 8; i++) Hl(i, i) *= (1 + lambda);
+
+                // Add damping
+                // lambda: damping parameter(initially 0.01)
+                for (int i = 0; i < 8; i++) {
+                    Hl(i, i) *= (1 + lambda);
+                }
+
+                // Solve: Hl * x = -b
+                // Dim: [8 x 8] * [8 x 1] = [8 x 1]
+                // x = [rot[0], rot[1], rot[2], trans[0], trans[1], trans[2], light.a, light.b]
+                // x indicates the direction of maximum change
                 Vec8 inc = Hl.ldlt().solve(-b);
 
                 // depends on the mode, if a,b is fixed, don't estimate them
@@ -140,21 +169,29 @@ namespace ldso {
                     inc[7] = incStitch[6];
                 }
 
+                // Extrapolation factor
+                // Step size
+                // Default: 1, higher than 1 if the damping factor is lower than the threshold
                 float extrapFac = 1;
-                if (lambda < lambdaExtrapolationLimit)
+                if (lambda < lambdaExtrapolationLimit) {
                     extrapFac = sqrtf(sqrt(lambdaExtrapolationLimit / lambda));
+                }
                 inc *= extrapFac;
 
+                // Apply scaling to each component of the increment vector
                 Vec8 incScaled = inc;
                 incScaled.segment<3>(0) *= SCALE_XI_ROT;
                 incScaled.segment<3>(3) *= SCALE_XI_TRANS;
                 incScaled.segment<1>(6) *= SCALE_A;
                 incScaled.segment<1>(7) *= SCALE_B;
 
-                if (!std::isfinite(incScaled.sum())) incScaled.setZero();
+                if (!std::isfinite(incScaled.sum())) {
+                    incScaled.setZero();
+                }
 
+                // Update pose and affLight by incScaled and re-evaluate the energy
                 // left multiply the pose and add to a,b
-                SE3 refToNew_new = SE3::exp((Vec6) (incScaled.head<6>())) * refToNew_current;
+                SE3 refToNew_new = SE3::exp((Vec6)(incScaled.head<6>())) * refToNew_current;
                 AffLight aff_g2l_new = aff_g2l_current;
                 aff_g2l_new.a += incScaled[6];
                 aff_g2l_new.b += incScaled[7];
@@ -170,7 +207,6 @@ namespace ldso {
                 //Vec2f relAff = AffLight::fromToVecExposure(lastRef->ab_exposure, newFrame->ab_exposure,
                 //                                           lastRef_aff_g2l, aff_g2l_new).cast<float>();
                 if (accept) {
-
                     // decrease lambda
                     calcGSSSE(lvl, H, b, refToNew_new, aff_g2l_new);
                     resOld = resNew;
@@ -184,16 +220,18 @@ namespace ldso {
                 }
 
                 // terminate if increment is small
+                // inc.norm() = L2-norm
                 if (!(inc.norm() > 1e-3)) {
                     break;
                 }
             } // end of L-M iteration
 
             // set last residual for that level, as well as flow indicators.
-            lastResiduals[lvl] = sqrtf((float) (resOld[0] / resOld[1]));
+            lastResiduals[lvl] = sqrtf((float)(resOld[0] / resOld[1]));
             lastFlowIndicators = resOld.segment<3>(2);
-            if (lastResiduals[lvl] > 1.5 * minResForAbort[lvl])
+            if (lastResiduals[lvl] > 1.5 * minResForAbort[lvl]) {
                 return false;
+            }
 
             // repeat this level level
             if (levelCutoffRepeat > 1 && !haveRepeated) {
@@ -206,16 +244,15 @@ namespace ldso {
         lastToNew_out = refToNew_current;
         aff_g2l_out = aff_g2l_current;
 
-        if ((setting_affineOptModeA != 0 && (fabsf(aff_g2l_out.a) > 1.2))
-            || (setting_affineOptModeB != 0 && (fabsf(aff_g2l_out.b) > 200)))
+        if ((setting_affineOptModeA != 0 && (fabsf(aff_g2l_out.a) > 1.2)) || (setting_affineOptModeB != 0 && (fabsf(aff_g2l_out.b) > 200))) {
             return false;
+        }
 
-        Vec2f relAff = AffLight::fromToVecExposure(lastRef->ab_exposure, newFrame->ab_exposure, lastRef_aff_g2l,
-                                                   aff_g2l_out).cast<float>();
+        Vec2f relAff = AffLight::fromToVecExposure(lastRef->ab_exposure, newFrame->ab_exposure, lastRef_aff_g2l, aff_g2l_out).cast<float>();
 
-        if ((setting_affineOptModeA == 0 && (fabsf(logf((float) relAff[0])) > 1.5))
-            || (setting_affineOptModeB == 0 && (fabsf((float) relAff[1]) > 200)))
+        if ((setting_affineOptModeA == 0 && (fabsf(logf((float) relAff[0])) > 1.5)) || (setting_affineOptModeB == 0 && (fabsf((float) relAff[1]) > 200))) {
             return false;
+        }
 
         if (setting_affineOptModeA < 0) aff_g2l_out.a = 0;
         if (setting_affineOptModeB < 0) aff_g2l_out.b = 0;
@@ -432,7 +469,7 @@ namespace ldso {
                             idepthl[i] = -1;
                             continue;    // just skip if something is wrong.
                         }
-                        
+
                         lpc_n++;
                     } else {
                         idepthl[i] = -1;
@@ -556,6 +593,8 @@ namespace ldso {
             }
         }
 
+        // Make sure the number of transformed points is a multiple of 4 
+        // SIMD instructions that operate on 4 data points at the same time are to be used in calcGSSSE
         while (numTermsInWarped % 4 != 0) {
             buf_warped_idepth[numTermsInWarped] = 0;
             buf_warped_u[numTermsInWarped] = 0;
@@ -581,6 +620,10 @@ namespace ldso {
     }
 
     void CoarseTracker::calcGSSSE(int lvl, Mat88 &H_out, Vec8 &b_out, const SE3 &refToNew, AffLight aff_g2l) {
+        // Streaming SIMD extensions reference
+        // _mm_set1_ps: Set all 4 registers to the same value(arg)
+        // _mm_load_ps: Load 4 floats from pointer to a __m128 register
+        // Calculate JTJ and JT(f - y) 
 
         acc.initialize();
 
